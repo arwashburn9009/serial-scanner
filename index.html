@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no">
+  <title>Serial Scanner → Work Orders</title>
+
+  <!-- Add-to-Home-Screen / PWA -->
+  <meta name="theme-color" content="#1d4ed8">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Serial Scan">
+  <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'%3E%3Crect width='180' height='180' rx='36' fill='%231d4ed8'/%3E%3Crect x='44' y='52' width='92' height='76' rx='10' fill='none' stroke='white' stroke-width='8'/%3E%3Ccircle cx='90' cy='90' r='20' fill='none' stroke='white' stroke-width='8'/%3E%3C/svg%3E">
+  <link rel="manifest" href="data:application/manifest+json,%7B%22name%22%3A%22Serial%20Scanner%22%2C%22short_name%22%3A%22Serial%20Scan%22%2C%22display%22%3A%22standalone%22%2C%22background_color%22%3A%22%23000000%22%2C%22theme_color%22%3A%22%231d4ed8%22%2C%22start_url%22%3A%22.%22%2C%22icons%22%3A%5B%7B%22src%22%3A%22data%3Aimage%2Fsvg%2Bxml%2C%253Csvg%2520xmlns%253D%2527http%253A%252F%252Fwww.w3.org%252F2000%252Fsvg%2527%2520viewBox%253D%25270%25200%2520180%2520180%2527%253E%253Crect%2520width%253D%2527180%2527%2520height%253D%2527180%2527%2520rx%253D%252736%2527%2520fill%253D%2527%25231d4ed8%2527%252F%253E%253C%252Fsvg%253E%22%2C%22sizes%22%3A%22180x180%22%2C%22type%22%3A%22image%2Fsvg%2Bxml%22%2C%22purpose%22%3A%22any%22%7D%5D%7D">
+
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+    html, body { height: 100%; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #000; color: #fff; overflow: hidden;
+      display: flex; flex-direction: column;
+    }
+    header {
+      padding: calc(env(safe-area-inset-top) + 10px) 16px 10px;
+      background: #0b1220; text-align: center; flex: 0 0 auto;
+    }
+    header h1 { font-size: 16px; font-weight: 700; letter-spacing: .2px; }
+    header p  { font-size: 11px; color: #93a4c0; margin-top: 2px; }
+
+    #stage { position: relative; flex: 1 1 auto; min-height: 0; background: #000; overflow: hidden; }
+    video  { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+
+    /* Scan reticle */
+    #reticle {
+      position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+      width: 68vw; max-width: 320px; aspect-ratio: 1.6 / 1;
+      border: 3px solid rgba(255,255,255,.9); border-radius: 14px;
+      box-shadow: 0 0 0 100vmax rgba(0,0,0,.45);
+      pointer-events: none;
+    }
+    #reticle::after {
+      content: ""; position: absolute; left: 8%; right: 8%; top: 50%;
+      height: 2px; background: #38bdf8; box-shadow: 0 0 8px #38bdf8;
+      animation: sweep 2s ease-in-out infinite;
+    }
+    @keyframes sweep { 0%,100% { transform: translateY(-46px); } 50% { transform: translateY(46px); } }
+
+    #status {
+      position: absolute; left: 0; right: 0; bottom: 12px; text-align: center;
+      font-size: 13px; color: #e5edff; text-shadow: 0 1px 3px #000; padding: 0 16px;
+    }
+
+    footer {
+      flex: 0 0 auto; background: #0b1220;
+      padding: 12px 14px calc(env(safe-area-inset-bottom) + 14px);
+      display: flex; flex-direction: column; gap: 10px;
+    }
+    .row { display: flex; gap: 10px; }
+    button {
+      flex: 1; padding: 13px 10px; border: none; border-radius: 10px;
+      font-size: 14px; font-weight: 600; cursor: pointer; color: #fff;
+      background: #1d4ed8; transition: filter .15s, background .15s;
+    }
+    button.secondary { background: #1f2937; border: 1px solid #374151; }
+    button:active { filter: brightness(.88); }
+    button:disabled { opacity: .5; }
+
+    .manual { display: flex; gap: 8px; }
+    .manual input {
+      flex: 1; padding: 12px; border-radius: 10px; border: 1px solid #374151;
+      background: #0f172a; color: #fff; font-size: 15px; letter-spacing: .5px;
+      text-transform: uppercase;
+    }
+    .manual input::placeholder { text-transform: none; letter-spacing: 0; color: #64748b; }
+
+    /* Result sheet */
+    #sheet {
+      position: fixed; inset: 0; background: rgba(0,0,0,.85);
+      display: none; align-items: center; justify-content: center; padding: 22px; z-index: 20;
+    }
+    #sheet.show { display: flex; }
+    .card {
+      background: #0f172a; border: 1px solid #233048; border-radius: 16px;
+      width: 100%; max-width: 380px; padding: 20px; text-align: center;
+    }
+    .card h2 { font-size: 13px; color: #93a4c0; font-weight: 600; margin-bottom: 6px; }
+    .card .serial {
+      font-size: 26px; font-weight: 800; letter-spacing: 1px; color: #fff;
+      background: #0b1220; border: 1px solid #1d4ed8; border-radius: 10px;
+      padding: 14px; width: 100%; text-align: center; text-transform: uppercase;
+    }
+    .card .raw { font-size: 11px; color: #5b6b86; margin: 10px 0 16px; word-break: break-all; }
+    .card .row { margin-top: 4px; }
+    .badge {
+      display: inline-block; font-size: 11px; font-weight: 700; padding: 3px 9px;
+      border-radius: 999px; margin-bottom: 12px;
+    }
+    .badge.bc  { background: #064e3b; color: #6ee7b7; }
+    .badge.ocr { background: #4a3a08; color: #fde68a; }
+    .hint { font-size: 11px; color: #64748b; text-align: center; margin-top: 2px; }
+    a.plainlink { color: #60a5fa; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Serial → Work Orders</h1>
+    <p>Point at the device label's barcode (or the printed SN)</p>
+  </header>
+
+  <div id="stage">
+    <video id="video" playsinline muted autoplay></video>
+    <div id="reticle"></div>
+    <div id="status">Starting camera…</div>
+  </div>
+
+  <footer>
+    <div class="row">
+      <button id="ocrBtn" class="secondary">Can't scan? Read text</button>
+      <button id="restartBtn" class="secondary">Restart camera</button>
+    </div>
+    <div class="manual">
+      <input id="manualInput" placeholder="or type serial e.g. CYM0655-0225" autocapitalize="characters" autocomplete="off">
+      <button id="manualGo" style="flex:0 0 auto; width:84px;">Open</button>
+    </div>
+    <p class="hint">Opens the Service History Record (Repair) list filtered to that serial.</p>
+  </footer>
+
+  <!-- Result confirmation sheet -->
+  <div id="sheet">
+    <div class="card">
+      <div id="srcBadge" class="badge bc">BARCODE</div>
+      <h2>Detected serial — confirm or edit</h2>
+      <input id="serialField" class="serial" autocapitalize="characters" autocomplete="off">
+      <div id="rawText" class="raw"></div>
+      <div class="row">
+        <button id="openBtn">Open Work Orders →</button>
+      </div>
+      <div class="row">
+        <button id="againBtn" class="secondary">Scan again</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Barcode engine (ZXing) -->
+  <script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js"></script>
+  <script>
+  // ──────────────────────────────────────────────────────────────────────────
+  // CONFIG — the SharePoint list to open, and how to filter it.
+  // The "Serial Number" column's internal name on this list is Serial_x0020_Number.
+  // To point this at a different list later, edit SP below.
+  // ──────────────────────────────────────────────────────────────────────────
+  const SP = {
+    base:        'https://cookmedical-my.sharepoint.com/personal/andrew_washburn_cookmedical_com/Lists/Service%20History%20Record/Repair.aspx',
+    viewid:      '905e3410-2bd8-49e6-9f74-e7db4c168f8c',
+    sortField:   'Completed_x0020_Date',
+    isAscending: 'false',
+    filterField: 'Serial_x0020_Number',
+  };
+
+  function buildUrl(serial) {
+    const p = new URLSearchParams();
+    p.set('sortField',   SP.sortField);
+    p.set('isAscending', SP.isAscending);
+    p.set('viewid',      SP.viewid);
+    p.set('FilterField1', SP.filterField);
+    p.set('FilterValue1', serial);
+    return SP.base + '?' + p.toString();
+  }
+
+  // Pull a serial out of a barcode payload or OCR text.
+  // Handles GS1 DataMatrix (AI 21), parenthesised GS1, and the printed pattern.
+  function extractSerial(text) {
+    if (!text) return null;
+    const t = String(text).toUpperCase().replace(/[]/g, ' '); // strip FNC1/GS
+    // 1) Explicit GS1 AI (21) with parentheses, e.g. "(21)CYM0655-0225"
+    let m = t.match(/\(21\)\s*([A-Z0-9][A-Z0-9-]{3,})/);
+    if (m) return tidy(m[1]);
+    // 2) The distinctive printed/serial pattern: letters + digits - digits (CYM0655-0225)
+    m = t.match(/[A-Z]{2,4}\d{3,5}-\d{2,5}/);
+    if (m) return tidy(m[0]);
+    // 3) Bare GS1 stream: after 01(GTIN,14) + 11(date,6), AI 21 runs to end.
+    m = t.match(/21([A-Z]{2,4}\d{3,5}-?\d{2,5})\s*$/);
+    if (m) return tidy(m[1]);
+    return null;
+  }
+  function tidy(s) { return s.replace(/\s+/g, '').replace(/[^A-Z0-9-]/g, ''); }
+
+  // ── UI elements ──
+  const video      = document.getElementById('video');
+  const statusEl   = document.getElementById('status');
+  const sheet      = document.getElementById('sheet');
+  const serialField= document.getElementById('serialField');
+  const rawText    = document.getElementById('rawText');
+  const srcBadge   = document.getElementById('srcBadge');
+  const ocrBtn     = document.getElementById('ocrBtn');
+
+  let reader = null;
+  let scanning = false;
+
+  function setStatus(msg) { statusEl.textContent = msg; }
+
+  async function startScanner() {
+    sheet.classList.remove('show');
+    if (!window.ZXing) { setStatus('Barcode engine failed to load — check your connection, then use “Read text” or type the serial.'); return; }
+    try {
+      const hints = new Map();
+      hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
+        ZXing.BarcodeFormat.DATA_MATRIX,
+        ZXing.BarcodeFormat.QR_CODE,
+        ZXing.BarcodeFormat.CODE_128,
+        ZXing.BarcodeFormat.CODE_39,
+        ZXing.BarcodeFormat.EAN_13,
+      ]);
+      hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
+      reader = new ZXing.BrowserMultiFormatReader(hints, 400);
+      scanning = true;
+      setStatus('Scanning… hold the barcode inside the frame');
+      await reader.decodeFromConstraints(
+        { video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } } },
+        video,
+        (result, err) => {
+          if (result && scanning) {
+            const raw = result.getText();
+            const serial = extractSerial(raw);
+            if (serial) { onDetect(serial, raw, 'barcode'); }
+            else { setStatus('Read a code but no serial in it — try the printed SN, or “Read text”.'); }
+          }
+        }
+      );
+    } catch (e) {
+      setStatus('Camera unavailable: ' + (e.message || e) + '. Note: the camera only works over HTTPS.');
+    }
+  }
+
+  function stopScanner() {
+    scanning = false;
+    try { reader && reader.reset(); } catch (_) {}
+  }
+
+  function onDetect(serial, raw, source) {
+    stopScanner();
+    if (navigator.vibrate) navigator.vibrate(60);
+    serialField.value = serial;
+    rawText.textContent = raw && raw !== serial ? ('Read: ' + raw) : '';
+    srcBadge.textContent = source === 'ocr' ? 'TEXT (OCR)' : 'BARCODE';
+    srcBadge.className = 'badge ' + (source === 'ocr' ? 'ocr' : 'bc');
+    sheet.classList.add('show');
+  }
+
+  // ── OCR fallback (Tesseract, lazy-loaded) ──
+  let tesseractLoading = null;
+  function loadTesseract() {
+    if (window.Tesseract) return Promise.resolve();
+    if (tesseractLoading) return tesseractLoading;
+    tesseractLoading = new Promise((res, rej) => {
+      const s = document.createElement('script');
+      s.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';
+      s.onload = res; s.onerror = rej;
+      document.head.appendChild(s);
+    });
+    return tesseractLoading;
+  }
+
+  async function runOcr() {
+    try {
+      ocrBtn.disabled = true;
+      setStatus('Loading text reader…');
+      await loadTesseract();
+      setStatus('Reading text…');
+      // Grab the current video frame, cropped to the reticle region for accuracy.
+      const vw = video.videoWidth, vh = video.videoHeight;
+      if (!vw) { setStatus('Camera not ready yet.'); ocrBtn.disabled = false; return; }
+      const cropW = vw * 0.8, cropH = vh * 0.5;
+      const cx = (vw - cropW) / 2, cy = (vh - cropH) / 2;
+      const canvas = document.createElement('canvas');
+      canvas.width = cropW; canvas.height = cropH;
+      canvas.getContext('2d').drawImage(video, cx, cy, cropW, cropH, 0, 0, cropW, cropH);
+      const { data } = await Tesseract.recognize(canvas, 'eng', {
+        tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-',
+      });
+      const serial = extractSerial(data.text);
+      if (serial) onDetect(serial, data.text.trim(), 'ocr');
+      else setStatus('Couldn’t find a serial in the text — try again or type it.');
+    } catch (e) {
+      setStatus('Text reading failed: ' + (e.message || e));
+    } finally {
+      ocrBtn.disabled = false;
+    }
+  }
+
+  // ── Actions ──
+  function openFor(serial) {
+    serial = tidy((serial || '').toUpperCase());
+    if (!serial) { serialField.focus(); return; }
+    window.location.href = buildUrl(serial);
+  }
+
+  document.getElementById('openBtn').addEventListener('click', () => openFor(serialField.value));
+  document.getElementById('againBtn').addEventListener('click', startScanner);
+  document.getElementById('restartBtn').addEventListener('click', startScanner);
+  ocrBtn.addEventListener('click', runOcr);
+  document.getElementById('manualGo').addEventListener('click', () => openFor(document.getElementById('manualInput').value));
+  document.getElementById('manualInput').addEventListener('keydown', e => { if (e.key === 'Enter') openFor(e.target.value); });
+
+  // Kick off
+  startScanner();
+  </script>
+</body>
+</html>
